@@ -276,7 +276,10 @@ export function bestOf(players) {
 export function matchQuote(game, series, opts = {}) {
   if (!game || !series) return null;
   const pid = game.userTeamId;
-  if (series.a !== pid && series.b !== pid) return null;
+  // 兼容两种结果结构：常规赛用 a/b，淘汰赛用 teamA/teamB
+  const a = series.a ?? series.teamA?.id;
+  const b = series.b ?? series.teamB?.id;
+  if (a !== pid && b !== pid) return null;
   const sq = game.squads[pid];
   const starters = (sq?.starters || []).map((id) => game.players[id]).filter(Boolean);
   const star = bestOf(starters);
@@ -288,7 +291,7 @@ export function matchQuote(game, series, opts = {}) {
     playerName: star.name,
     trait: star.trait,
     won,
-    text: pickQuote(star, situation, `s${game.season}:${series.matchId || series.a}`),
+    text: pickQuote(star, situation, `s${game.season}:${series.matchId || a}`),
   };
 }
 

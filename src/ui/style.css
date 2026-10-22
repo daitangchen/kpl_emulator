@@ -187,6 +187,8 @@ tr.relegate td { border-left: 2px solid var(--red); }
 .score-line.lose .sc { color: var(--red); }
 .score-line.mine { background: rgba(74, 158, 255, .09); border-radius: 6px; padding: 7px 6px; }
 .score-line .flag { font-size: 10px; color: var(--txt-mute); }
+.score-line .flag.m { color: var(--gold); }
+.score-line .flag.e { color: var(--txt-dim); }
 
 /* 对局小圆点 */
 .games { display: flex; gap: 4px; margin-top: 6px; }
@@ -204,6 +206,44 @@ tr.relegate td { border-left: 2px solid var(--red); }
   background: linear-gradient(90deg, rgba(245, 196, 81, .18), rgba(169, 123, 255, .18));
   border: 1px solid var(--gold-dim); font-size: 12px; color: var(--gold); font-weight: 600;
 }
+
+/* ── 巅峰对决 BP ───────────────────────────────────── */
+.peak-meta { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; }
+.peak-meta-hero {
+  background: var(--bg-hi); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 6px 4px; text-align: center; min-width: 0;
+}
+.peak-meta-hero .mute { font-size: 10px; }
+.peak-meta-hero .nm { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peak-meta-hero .tag { font-size: 10px; margin-top: 2px; display: inline-block; }
+.peak-pick-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; border-top: 1px solid var(--line-soft); font-size: 12px;
+}
+.peak-pick-row .pos { flex: none; width: 72px; color: var(--txt-dim); }
+.peak-pick-row .grow { display: flex; align-items: baseline; gap: 4px; overflow: hidden; }
+.peak-pick-row .mute { font-size: 11px; }
+.peak-lineup { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.peak-lineup .mute { flex: none; width: 44px; }
+.peak-lineup .pill { font-size: 11px; padding: 2px 6px; }
+/* 对手 BP 习惯 */
+.peak-habit { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 6px; }
+.peak-habit-hero {
+  background: rgba(255, 95, 109, .08); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 5px 4px; text-align: center; min-width: 0;
+}
+.peak-habit-hero .mute { font-size: 10px; }
+.peak-habit-hero .nm { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 60vh; overflow-y: auto; }
+.hero-opt {
+  display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: var(--radius-sm);
+  background: var(--bg-hi); border: 1px solid var(--line); cursor: pointer; font-size: 13px;
+}
+.hero-opt:hover { border-color: var(--gold-dim); }
+.hero-opt.on { border-color: var(--gold); background: rgba(245, 196, 81, .1); }
+.hero-opt b { flex: 1; }
+.hero-opt .tag { font-size: 10px; }
+.hero-opt .mute { font-size: 11px; }
 
 /* ── 阶段进度 ───────────────────────────────────────── */
 .stage-strip { display: flex; gap: 4px; margin-bottom: 12px; }
@@ -612,3 +652,181 @@ html, body { height: 100%; overflow: hidden; }
   }
   .board-table { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* ══════════════════ 视觉增强（v1.9 整体美化） ══════════════════ */
+
+/* 背景氛围：顶部金色光晕 + 底部蓝紫光晕，营造电竞舞台感 */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(900px 420px at 50% -8%, rgba(245, 196, 81, .10), transparent 60%),
+    radial-gradient(720px 420px at 85% 110%, rgba(74, 158, 255, .10), transparent 60%),
+    radial-gradient(620px 380px at 12% 108%, rgba(169, 123, 255, .08), transparent 60%);
+}
+#app {
+  max-width: 1500px;
+  background: transparent;
+}
+
+/* 卡片：更精致的边框与内发光 */
+.card {
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, rgba(30, 38, 55, .72), rgba(23, 29, 43, .9));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .02) inset, 0 8px 20px rgba(0, 0, 0, .18);
+}
+.card.hi { border-color: var(--line); background: linear-gradient(180deg, rgba(38, 48, 70, .75), rgba(30, 38, 55, .9)); }
+.card.gold {
+  border-color: var(--gold-dim);
+  background: linear-gradient(180deg, rgba(245, 196, 81, .08), rgba(23, 29, 43, .92));
+  box-shadow: 0 0 0 1px rgba(245, 196, 81, .12) inset, 0 10px 26px rgba(0, 0, 0, .28);
+}
+
+/* 卡片标题：左侧金色竖条，强化层级 */
+.card-title { position: relative; padding-left: 10px; }
+.card-title::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 14px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--gold), var(--gold-dim));
+}
+
+/* 面板标题：金色装饰 */
+.panel-title { position: relative; padding-left: 10px; }
+.panel-title::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 14px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--gold), var(--gold-dim));
+}
+
+/* 标题 h1：金色渐变文字 */
+h1 {
+  background: linear-gradient(90deg, #f8d57e, #f5c451 40%, #e8a33c);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+/* 按钮：更精致的渐变与阴影，hover 发光 */
+button {
+  background: linear-gradient(180deg, #232c41, #1b2233);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .25);
+}
+button:hover:not(:disabled) { border-color: #35455f; }
+button.primary {
+  background: linear-gradient(180deg, #4a8bee, #3167bf);
+  border-color: #5d97f2;
+  box-shadow: 0 3px 12px rgba(74, 158, 255, .28);
+}
+button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(74, 158, 255, .42); }
+button.gold {
+  background: linear-gradient(180deg, #e2b24a, #bd8b28);
+  border-color: #f0c96a; color: #1a1405;
+  box-shadow: 0 3px 12px rgba(245, 196, 81, .3);
+}
+button.gold:hover:not(:disabled) { box-shadow: 0 4px 18px rgba(245, 196, 81, .45); }
+
+/* 顶栏：金色渐变底线 + 音乐按钮 */
+#topbar { border-bottom: 1px solid transparent; border-image: linear-gradient(90deg, transparent, var(--gold-dim), transparent) 1; }
+.tb-bgm {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  border-radius: 50%; display: grid; place-items: center; font-size: 14px;
+}
+.tb-team { background: linear-gradient(90deg, #f8d57e, #f5c451); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* 底部导航：激活态金色光晕 */
+#tabbar button.on { color: var(--gold); text-shadow: 0 0 12px rgba(245, 196, 81, .5); }
+#tabbar button.on .ico { transform: translateY(-1px); }
+
+/* 比分卡数字：更醒目 */
+.score-line .sc { color: var(--txt); }
+
+/* 小圆点：圆润 + 微光 */
+.game-dot { border-radius: 50%; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); }
+.game-dot.w { box-shadow: 0 0 8px rgba(53, 208, 127, .35); }
+.game-dot.l { box-shadow: 0 0 8px rgba(255, 95, 109, .3); }
+
+/* 滚动条：金色系 */
+.panel-workspace::-webkit-scrollbar-thumb, .panel-board::-webkit-scrollbar-thumb,
+.panel-match::-webkit-scrollbar-thumb, .panel-squad::-webkit-scrollbar-thumb,
+.panel-next::-webkit-scrollbar-thumb, #screen::-webkit-scrollbar-thumb,
+.modal::-webkit-scrollbar-thumb, .hero-picker::-webkit-scrollbar-thumb {
+  background: var(--gold-dim); border-radius: 3px;
+}
+
+/* 巅峰对决：整卡金色光晕氛围 */
+.card.gold .card-title::before { background: linear-gradient(180deg, #ffe08a, #f5c451); }
+.peak-banner { box-shadow: 0 4px 16px rgba(245, 196, 81, .15); }
+
+/* 英雄选择器选项：hover 精致 */
+.hero-opt { transition: border-color .12s, transform .06s, background .12s; }
+.hero-opt:hover { border-color: var(--gold); background: rgba(245, 196, 81, .06); }
+.hero-opt:active { transform: scale(.98); }
+.hero-opt.on { box-shadow: 0 0 0 1px var(--gold) inset; }
+
+/* 工作台面板：微妙的背景层次 */
+.panel-workspace, .panel-board, .panel-match, .panel-next, .panel-squad {
+  background: linear-gradient(180deg, rgba(23, 29, 43, .8), rgba(18, 23, 34, .88));
+}
+
+/* 树形对阵图节点：赢家高亮微光 */
+.bk2-node.mine { box-shadow: 0 0 0 1px var(--gold), 0 4px 12px rgba(245, 196, 81, .18); }
+
+/* 弹窗：精致描边 */
+.modal { border-color: var(--line); box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
+
+/* 提示条：金色描边 */
+.toast { border-color: var(--gold-dim); background: linear-gradient(180deg, rgba(38, 48, 70, .97), rgba(30, 38, 55, .97)); }
+
+/* ══════════════════ 巅峰对决金边渐显 + 夺冠捧杯 ══════════════════ */
+
+/* 巅峰对决卡片：金边从无到有渐渐镶嵌 */
+.peak-card { position: relative; overflow: hidden; }
+.peak-card::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  border: 2px solid transparent;
+  animation: peak-gold-in 1.6s ease forwards;
+}
+@keyframes peak-gold-in {
+  0%   { border-color: rgba(245, 196, 81, 0); box-shadow: inset 0 0 0 rgba(245, 196, 81, 0); }
+  45%  { border-color: rgba(245, 196, 81, .28); }
+  100% { border-color: rgba(245, 196, 81, .9); box-shadow: inset 0 0 26px rgba(245, 196, 81, .16); }
+}
+/* 金边持续呼吸光晕 */
+.peak-card::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  animation: peak-gold-breathe 3s ease-in-out infinite;
+}
+@keyframes peak-gold-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 rgba(245, 196, 81, 0); }
+  50%      { box-shadow: inset 0 0 34px rgba(245, 196, 81, .22); }
+}
+
+/* 夺冠捧杯卡片 */
+.champion-card {
+  position: relative; overflow: hidden;
+  margin-top: 10px; padding: 22px 14px; text-align: center;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(245, 196, 81, .12), rgba(23, 29, 43, .94));
+  border: 1px solid var(--gold-dim);
+  animation: champion-in .8s ease;
+}
+@keyframes champion-in { from { opacity: 0; transform: translateY(14px); } }
+.champion-trophy {
+  font-size: 56px; line-height: 1;
+  animation: trophy-rise .9s cubic-bezier(.2, .7, .3, 1.2) both;
+}
+@keyframes trophy-rise { from { opacity: 0; transform: translateY(22px) scale(.7); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.champion-title {
+  margin-top: 8px; font-size: 22px; font-weight: 800;
+  background: linear-gradient(90deg, #ffe08a, #f5c451 45%, #e8a33c);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.champion-sub { margin-top: 4px; font-size: 13px; color: var(--gold); font-weight: 600; }
+.champion-rays {
+  position: absolute; left: 50%; top: 30px; width: 200px; height: 200px;
+  transform: translateX(-50%); pointer-events: none;
+  background: radial-gradient(circle, rgba(245, 196, 81, .28), transparent 65%);
+  animation: champion-rays 2.4s ease-in-out infinite;
+}
+@keyframes champion-rays {
+  0%, 100% { opacity: .5; transform: translateX(-50%) scale(.9); }
+  50%      { opacity: 1; transform: translateX(-50%) scale(1.15); }
+}
+.champion-card .interview { text-align: left; background: rgba(0, 0, 0, .16); }

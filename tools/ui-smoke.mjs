@@ -177,6 +177,8 @@ check('抽卡建队：18 支战队都能抽满 5 个位置并解锁开始（历�
 
 const rngRef = { value: null };
 const { createRng } = await import('../src/core/rng.js');
+const lineupMod = await import('../src/sim/lineup.js');
+const heroMod = await import('../src/data/heroes.js');
 rngRef.value = createRng(424242);
 
 let game;
@@ -803,9 +805,14 @@ check('③ BO7 分段：上半场 3 局 → 挂起 → 中场调整 → 下半�
       if (![3, 3].includes(s2.games.length) && s2.games.length !== s2.bestOf - 1) {
         throw new Error(`进入阵容博弈时局数异常：${s2.games.length}`);
       }
-      r3 = advanceOnce(g, { lineup: 'teamfight' });
+      // 选一套明确的 5 英雄（5 个位置各一），确认被采用
+      const pickIds = ['machao', 'jing', 'xishi', 'gongsunli', 'zhangfei'];
+      r3 = advanceOnce(g, { picks: pickIds });
       if (!r3.lineup) throw new Error('阵容博弈结果没有写回');
-      if (r3.lineup.mine !== 'teamfight') throw new Error('玩家的阵容选择没有被采用');
+      if (!Array.isArray(r3.lineup.mine) || r3.lineup.mine.length !== 5) throw new Error('玩家的 5 英雄阵容没有被采用');
+      for (const id of pickIds) {
+        if (!r3.lineup.mine.includes(id)) throw new Error(`玩家选的英雄 ${id} 没有被采用`);
+      }
       if (typeof r3.lineup.bonus !== 'number') throw new Error('阵容博弈缺少加成数值');
     }
     const res = r3.playerMatch?.result;
@@ -1311,6 +1318,136 @@ check('⑦ 比分方向与官方树形对阵图', () => {
     .flatMap((r) => r.children.filter((c) => c.classList && c.classList.contains('bk2-score')).map((c) => c.textContent));
   if (scores[0] !== '3' || scores[1] !== '4') throw new Error(`总决赛比分方向反了：${scores.join('/')}`);
   return `官方树形对阵图（4 列 7 轮标题），总决赛按行显示 ${wShort} 3 / ${aShort} 4`;
+});
+
+check('⑧ 巅峰对决 BP：版本强势阵容 + 逐位置选英雄 + 克制结算', () => {
+  // 版本强势阵容：5 个位置各一个，且都是出场率最高的
+  const rec = lineupMod.metaRecommendation();
+  if (rec.length !== 5) throw new Error(`版本强势阵容应有 5 个英雄，实际 ${rec.length}`);
+  for (const p of heroMod.POSITIONS) {
+    const top = heroMod.heroesByPos(p.key)[0];
+    const got = rec.find((h) => h.pos === p.key);
+    if (!got || got.id !== top.id) throw new Error(`${p.name} 的版本强势英雄应是 ${top.name}，实际 ${got?.name}`);
+  }
+  // 选人归一化：缺位自动补版本强势；乱序也能排成 5 位置
+  const picks = lineupMod.normalizePicks(['jing', 'xishi']);   // 只给打野+中路
+  if (picks.length !== 5) throw new Error(`归一化后应为 5 个英雄，实际 ${picks.length}`);
+  // 结算：版本强度差 + 克制 + 契合都应有数值
+  const g = createGame({ userTeamId: 'ag' });
+  g.__rng = createRng(1);
+  const myPicks = ['machao', 'jing', 'xishi', 'gongsunli', 'zhangfei'];  // 全 T0
+  const theirPicks = ['yuange', 'juyoujing', 'jinchan', 'chengjisihan', 'guiguzi']; // 全 T2（collapse 倾向）
+  const r = lineupMod.resolvePeak(g, 'ag', 'wolves', myPicks, theirPicks);
+  if (r.myPower <= r.theirPower) throw new Error('全 T0 对全 T2 版本强度应更高');
+  if (typeof r.counter !== 'number' || typeof r.bonus !== 'number') throw new Error('克制/加成字段缺失');
+  if (!r.text) throw new Error('缺少结算结论文字');
+  // 克制环：五种倾向构成闭环（poke 克 protect，protect 克 collapse，collapse 克 teamfight）
+  if (lineupMod.counterOf('poke', 'protect') !== 1) throw new Error('poke 应克制 protect');
+  if (lineupMod.counterOf('protect', 'collapse') !== 1) throw new Error('protect 应克制 collapse');
+  if (lineupMod.counterOf('collapse', 'teamfight') !== 1) throw new Error('collapse 应克制 teamfight');
+  if (lineupMod.counterOf('teamfight', 'split') !== 1) throw new Error('teamfight 应克制 split');
+  if (lineupMod.counterOf('split', 'poke') !== 1) throw new Error('split 应克制 poke');
+  if (lineupMod.counterOf('protect', 'poke') !== -1) throw new Error('protect 应被 poke 克制');
+  // 对手 BP 习惯：由战术风格推导出打法倾向 + 各位置招牌英雄
+  const habit = lineupMod.teamBpHabit(g, 'wolves');
+  if (!habit.tendency || !habit.tendencyName) throw new Error('对手 BP 习惯缺少打法倾向');
+  if (!Array.isArray(habit.signatures) || habit.signatures.length !== 5) throw new Error('对手 BP 习惯应有 5 个位置的招牌英雄');
+  for (const sig of habit.signatures) {
+    if (!sig.pos || !sig.hero || !heroMod.HERO_BY_ID[sig.hero.id]) throw new Error('招牌英雄数据异常');
+  }
+  return `版本强势 5 位置齐备；归一化补位正确；全T0胜全T2（${r.myPower} vs ${r.theirPower}）；克制环闭环成立；对手 BP 习惯可读`;
+});
+
+check('⑨ 巅峰对决 BP 界面：主动选英雄 + 对手 BP 习惯展示', () => {
+  const g = createGame({ userTeamId: 'ag' });
+  app.__test.setGame(g);
+  app.__test.setViewportWidth(1440);
+  app.__test.setTab('office');
+  const series = {
+    bestOf: 7, a: 3, b: 3, segments: [3, 6, 7], segIndex: 0, targetWins: 4, games: [],
+    p: { teamA: { id: 'ag', name: 'AG' }, teamB: { id: 'wolves', name: '狼队' }, stage: '' },
+  };
+  app.__test.state.log = [{ kind: 'seriesPause', phase: 'lineup', stageName: 'KPL春季赛', label: '季后赛', day: 1, match: { a: 'ag', b: 'wolves', id: 'F', bracket: 'F' }, series }];
+  app.__test.state.cursor = 0;
+  app.__test.renderShell();
+  const txt = els.screen.textContent || '';
+  if (!txt.includes('未选择')) throw new Error('BP 初始应为「未选择」（主动选英雄而非更换）');
+  if (!txt.includes('对手 BP 习惯')) throw new Error('缺少对手 BP 习惯展示');
+  // 点「选英雄」应弹出该位置的英雄选择器（此前 h 遮蔽 bug 会导致点了没反应）
+  const pickBtns = els.screen.findClickable(/^选英雄$/);
+  if (pickBtns.length !== 5) throw new Error(`应有 5 个「选英雄」按钮，实际 ${pickBtns.length}`);
+  pickBtns[0].click();
+  const heroOpts = els['modal-root'].all().filter((e) => e.classList && e.classList.contains('hero-opt'));
+  if (heroOpts.length !== 8) throw new Error(`英雄选择器应有 8 个英雄，实际 ${heroOpts.length}`);
+  // 选一个英雄后应回填
+  heroOpts[1].click();
+  const after = els.screen.textContent || '';
+  if (!after.includes('已选 1/5')) throw new Error('选英雄后计数未更新');
+  return 'BP 主动选择（未选择→选英雄弹窗 8 英雄→回填计数），对手 BP 习惯可读';
+});
+
+check('⑩ 年度总决赛小组赛：左下角积分榜切换为大师组/精英组', () => {
+  const { finalsBoard } = seasonMod;
+  const g = createGame({ userTeamId: 'ag' });
+  const finalsStage = g.stages.find((st) => st.kind === 'finals');
+  g.stageIndex = g.stages.indexOf(finalsStage);
+  finalsStage.masters = ['ag', 'wolves', 'ksg', 'wb', 'ttg', 'estar'];
+  finalsStage.elite = ['drg', 'jdg', 'dyg', 'edgm', 'hero', 'lgd'];
+  finalsStage.results = [
+    { a: 'ag', b: 'drg', scoreA: 3, scoreB: 1 },
+    { a: 'wolves', b: 'jdg', scoreA: 2, scoreB: 3 },
+  ];
+  // finalsBoard 应返回两组 + 各自积分榜
+  const fb = finalsBoard(g);
+  if (!fb || fb.masters.length !== 6 || fb.elite.length !== 6) throw new Error('finalsBoard 分组缺失');
+  if (Object.keys(fb.mastersTable || {}).length !== 6) throw new Error('大师组积分榜缺少队伍');
+  // 左下角面板应显示「年总积分榜」+ 大师组/精英组
+  app.__test.setGame(g);
+  app.__test.setViewportWidth(1440);
+  app.__test.setTab('office');
+  app.__test.state.cursor = 999;
+  app.__test.state.log = [];
+  app.__test.renderShell();
+  const board = els.screen.all().find((e) => e.classList && e.classList.contains('panel-board'));
+  const bt = board?.textContent || '';
+  if (!bt.includes('年总积分榜')) throw new Error('左下角没有切换为年总积分榜');
+  if (!bt.includes('大师组') || !bt.includes('精英组')) throw new Error('缺少大师组/精英组积分榜');
+  if (bt.includes('S 组') || bt.includes('A 组') || bt.includes('B 组')) throw new Error('年总阶段仍显示常规赛 S/A/B 积分榜');
+  return '年总小组赛阶段左下角切换为大师组/精英组积分榜';
+});
+
+check('⑪ 夺冠：捧杯时刻 + 冠军赛后采访', () => {
+  const g = createGame({ userTeamId: 'ag' });
+  app.__test.setGame(g);
+  app.__test.setViewportWidth(1440);
+  app.__test.setTab('office');
+  const result = {
+    scoreA: 4, scoreB: 2, finalScore: '4-2', winnerId: 'ag', loserId: 'wolves', games: [],
+    teamA: { id: 'ag', name: 'AG' }, teamB: { id: 'wolves', name: '狼队' },
+  };
+  const bracket = bracketMod.doubleElimTemplate8(['ag', 'wolves', 'ksg', 'wb', 'ttg', 'estar', 'drg', 'jdg']);
+  const F = bracket.find((m) => m.id === 'F');
+  F.a = 'ag'; F.b = 'wolves';
+  bracketMod.applyMatchResult(bracket, F, result);
+  app.__test.state.log = [{
+    kind: 'bracket', stageName: 'KPL 春季赛', label: '季后赛', bracket, day: 1,
+    matches: [{ match: { a: 'ag', b: 'wolves', id: 'F', bracket: 'F' }, result }],
+    finished: true, championId: 'ag', playerPlacement: 1,
+  }];
+  app.__test.state.cursor = 0;
+  app.__test.renderShell();
+  const txt = els.screen.textContent || '';
+  if (!txt.includes('捧杯时刻')) throw new Error('夺冠后缺少捧杯时刻');
+  if (!txt.includes('冠军奖杯')) throw new Error('夺冠后缺少冠军奖杯文案');
+  if (!txt.includes('赛后采访')) throw new Error('夺冠后缺少赛后采访环节');
+  const champ = els.screen.all().find((e) => e.classList && e.classList.contains('champion-card'));
+  if (!champ) throw new Error('缺少夺冠庆祝卡片');
+  // 非夺冠（冠军是别人）不应有捧杯时刻
+  app.__test.state.log = [{ kind: 'bracket', stageName: 'KPL 春季赛', label: '季后赛', bracket, day: 1, matches: [{ match: { a: 'ag', b: 'wolves', id: 'F', bracket: 'F' }, result }], finished: true, championId: 'wolves', playerPlacement: 2 }];
+  app.__test.state.cursor = 0;
+  app.__test.renderShell();
+  if ((els.screen.textContent || '').includes('捧杯时刻')) throw new Error('非夺冠时不应出现捧杯时刻');
+  return '夺冠时渲染捧杯时刻 + 冠军赛后采访；非夺冠不渲染';
 });
 
 console.log(errors === 0 ? '\n全部通过 ✓' : `\n有 ${errors} 项失败 ✗`);

@@ -81,6 +81,9 @@ export function eventsFromResult(game, r, stage) {
       results: r.results || [],
       playerResult: r.playerResult,
       finished: r.finished,
+      masters: r.masters || [],
+      elite: r.elite || [],
+      tables: r.tables || null,
       stage,
     });
   } else if (r.type === 'survival') {

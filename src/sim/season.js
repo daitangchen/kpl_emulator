@@ -16,7 +16,7 @@ import { developAll, marketValue, generateProspect } from './develop.js';
 import { refreshMarket, repairSquad, setStarter } from './transfer.js';
 import { arcOf, pickQuote, bestOf } from './story.js';
 import { SERIES_ADJUST } from './training.js';
-import { LINEUP_BY_ID, aiLineup, resolveLineup } from './lineup.js';
+import { aiPeakPicks, resolvePeak } from './lineup.js';
 
 const snakeOrder = (ranked, divisions = DIVISIONS) => {
   const assign = { S: [], A: [], B: [] };
@@ -143,6 +143,24 @@ export function currentStage(game) {
     return st.done && st.phase === 'playoff' && st.bracket?.find((m) => m.id === 'F')?.winnerId ? null : st;
   }
   return st.done ? null : st;
+}
+
+/** 年度总决赛小组赛/突围赛阶段的「大师组 × 精英组」实时积分榜（左下角用） */
+export function finalsBoard(game) {
+  const st = currentStage(game);
+  if (!st || st.kind !== 'finals') return null;
+  if (st.phase === 'playoff') return null;   // 淘汰赛阶段交给对阵图
+  const masters = st.masters || [];
+  const elite = st.elite || [];
+  if (!masters.length && !elite.length) return null;
+  const res = st.results || [];
+  return {
+    phase: st.phase,
+    masters,
+    elite,
+    mastersTable: buildStandings(masters, res.filter((m) => masters.includes(m.a) || masters.includes(m.b))),
+    eliteTable: buildStandings(elite, res.filter((m) => elite.includes(m.a) || elite.includes(m.b))),
+  };
 }
 
 function ensureGroupDay(game, stage) {
@@ -582,13 +600,13 @@ function seriesPower(game, s, boostA = 0, boostB = 0) {
   };
 }
 
-/** 巅峰对决前的阵容博弈：玩家选阵容，AI 按自己的风格出招 */
+/** 巅峰对决前的阵容博弈：玩家逐位置选 5 个英雄，AI 按自己的风格出招 */
 function playLineupPhase(game, s, action, rng) {
   const myId = s.p.teamA.id === game.userTeamId ? s.p.teamA.id : s.p.teamB.id;
   const oppId = myId === s.p.teamA.id ? s.p.teamB.id : s.p.teamA.id;
-  const mine = (action && action.lineup && LINEUP_BY_ID[action.lineup]) ? action.lineup : 'teamfight';
-  const theirs = aiLineup(game, oppId, rng);
-  const r = resolveLineup(game, myId, oppId, mine, theirs, rng);
+  const mine = (action && action.picks) ? action.picks : null;   // 缺省由 resolvePeak 用版本强势补齐
+  const theirs = aiPeakPicks(game, oppId, rng);
+  const r = resolvePeak(game, myId, oppId, mine, theirs);
   const boost = myId === s.p.teamA.id ? [r.bonus, 0] : [0, r.bonus];
   return { ...r, boostA: boost[0], boostB: boost[1] };
 }
@@ -750,7 +768,17 @@ function advanceFinals(game, rng, stage) {
         stage.done = false;
         nextStage(game);
       }
-      return { type: 'arena', stage, day: day.round, results, playerResult: results.find((r) => r.isPlayer) || null, finished: stage.day > stage.arenaDays.length };
+      // 实时积分榜（大师组 × 精英组，组外单循环）
+      const tables = {
+        masters: buildStandings(stage.masters, stage.results.filter((m) => stage.masters.includes(m.a) || stage.masters.includes(m.b))),
+        elite: buildStandings(stage.elite, stage.results.filter((m) => stage.elite.includes(m.a) || stage.elite.includes(m.b))),
+      };
+      return {
+        type: 'arena', stage, day: day.round, results,
+        playerResult: results.find((r) => r.isPlayer) || null,
+        finished: stage.day > stage.arenaDays.length,
+        masters: stage.masters, elite: stage.elite, tables,
+      };
     }
     stage.phase = 'survival';
     stage.done = false;

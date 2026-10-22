@@ -4,7 +4,7 @@
 import { TEAMS, TEAM_BY_ID, DIFFICULTY, STYLES } from '../data/teams.js';
 import { PLAYERS, ROLE_ORDER } from '../data/players.js';
 import { createGame, advanceOnce, saveGame, loadGame, hasSave, clearSave } from '../core/state.js';
-import { currentStage, nextStage, beginNextSeason, beginOffseason, overallRanking, divisionOfTeam, annualStandings, finalLeaguePlacements } from '../sim/season.js';
+import { currentStage, nextStage, beginNextSeason, beginOffseason, overallRanking, divisionOfTeam, annualStandings, finalLeaguePlacements, finalsBoard } from '../sim/season.js';
 import { rankTeams } from '../sim/groups.js';
 import { META_VERSIONS, teamPower } from '../sim/team.js';
 import { FINANCE, REGULAR_ROUNDS, FAILURE_RULES, FINALS_RULES, leagueShareForRank } from '../core/constants.js';
@@ -25,9 +25,11 @@ import {
   remainingBusiness, fatiguePenalty,
 } from '../sim/business.js';
 import { FATIGUE } from '../core/constants.js';
-import { LINEUPS, LINEUP_BY_ID, styleAffinity } from '../sim/lineup.js';
+import { HEROES, HERO_BY_ID, POSITIONS, heroesByPos, TIER_LABEL, STYLE_LABEL } from '../data/heroes.js';
+import { metaRecommendation, teamBpHabit } from '../sim/lineup.js';
 import { h, clear, modal, closeModal, toast, teamShort, ROLE_LABEL, divBadge } from './dom.js';
 import { eventsFromResult, newSeasonEvent, cashWarning, boardWarning } from './events.js';
+import { playPeakBgm, stopBgm, toggleBgm, bgmEnabled } from './bgm.js';
 
 const ROLE_NAME = { top: '对抗路', jungle: '打野', mid: '中路', adc: '发育路', support: '游走' };
 const ROLE_ICON = { top: '🛡', jungle: '🌲', mid: '✦', adc: '🏹', support: '🧭' };
@@ -38,6 +40,8 @@ const state = {
   log: [],              // 待展示的事件流
   cursor: 0,            // 当前展示到第几条
   seriesStage: {},      // BO7/BO9 分段进度
+  peakPicks: null,      // 巅峰对决 BP 的选人 { top, jungle, mid, adc, support }
+  peakFor: null,        // 当前 BP 对应的事件引用（用于判断是否首次进入）
   pendingSeasonEnd: false,
   offseason: null,      // 休赛期数据（成长/新秀/市场）
   offseasonStage: 'develop',
@@ -258,6 +262,12 @@ function renderTopbar() {
       h('span', { class: 'tb-team', text: TEAM_BY_ID[g.userTeamId].name }),
       h('span', { class: 'tb-div', text: `${div} 组` }),
       h('span', { class: 'tb-stage', text: stage ? `${stage.eventName} · ${stage.roundName || stage.label || ''}` : '赛季结束' }),
+      h('button', {
+        class: 'tb-bgm',
+        title: '背景音乐（巅峰对决时播放）',
+        text: bgmEnabled() ? '🔊' : '🔇',
+        onClick: () => { toggleBgm(); renderShell(); },
+      }),
     ]),
     h('div', { class: 'tb-stats' }, [
       h('span', { class: g.cash < 0 ? 'danger' : '' }, ['现金 ', h('b', { text: `${Math.round(g.cash)} 万` })]),
@@ -440,17 +450,34 @@ function knockoutStage(game) {
 function renderBoardPanel() {
   const g = state.game;
   const ko = knockoutStage(g);
+  const fb = ko ? null : finalsBoard(g);
+  const title = ko ? '淘汰赛对阵图' : fb ? '年总积分榜' : '积分榜 · 近五场';
+  const tag = ko ? (ko.eventName || '淘汰赛') : fb ? '大师组 × 精英组' : `第 ${g.season} 赛季`;
   const panel = h('div', { class: 'panel panel-board' }, [
-    h('div', { class: 'panel-title' }, [
-      ko ? '淘汰赛对阵图' : '积分榜 · 近五场',
-      h('span', { class: 'tag pill', text: ko ? (ko.eventName || '淘汰赛') : `第 ${g.season} 赛季` }),
-    ]),
+    h('div', { class: 'panel-title' }, [title, h('span', { class: 'tag pill', text: tag })]),
   ]);
   if (ko) {
     panel.append(renderBracketTree(ko.bracket, g));
     if (ko.championId) {
       panel.append(h('p', { class: 'mute mt', text: `冠军：${TEAM_BY_ID[ko.championId]?.name || '-'}${ko.playerPlacement ? `　|　你的名次：第 ${ko.playerPlacement} 名` : ''}` }));
     }
+  } else if (fb) {
+    // 年总小组赛：大师组 / 精英组两组积分榜并置
+    const table = (title2, ids, tb) => h('div', { class: 'board-group' }, [
+      h('div', { class: 'board-head' }, [h('b', { text: title2 })]),
+      ...rankTeams(ids, tb).map((id, i) => {
+        const row = tb?.[id];
+        return h('div', { class: `board-row ${id === g.userTeamId ? 'mine' : ''}` }, [
+          h('span', { class: 'pos', text: String(i + 1) }),
+          h('span', { class: 'nm', text: TEAM_BY_ID[id].short }),
+          h('span', { class: 'rec', text: row ? `${row.wins}-${row.losses}` : '—' }),
+        ]);
+      }),
+    ]);
+    panel.append(h('div', { class: 'board-split' }, [
+      table('大师组', fb.masters, fb.mastersTable),
+      table('精英组', fb.elite, fb.eliteTable),
+    ]));
   } else {
     // 积分榜与近五场左右并置
     panel.append(h('div', { class: 'board-split' }, [
@@ -870,7 +897,7 @@ function renderEvent(ev) {
           renderDotsFor(pc.games, true, false),
         ]));
         if (ev.adjustment) card.append(h('div', { class: 'peak-banner', text: `中场调整：${ev.adjustment.text}` }));
-        if (ev.lineup) card.append(h('div', { class: 'peak-banner gold', text: `巅峰对决博弈：${ev.lineup.text}` }));
+        if (ev.lineup) card.append(peakLineupShow(ev.lineup));
       }
     }
     screen.append(card, h('div', { class: 'card' }, [
@@ -894,17 +921,53 @@ function renderEvent(ev) {
   }
 
   if (ev.kind === 'arena') {
+    const g = state.game;
+    const masters = ev.masters || [];
+    const elite = ev.elite || [];
+    const isMaster = (id) => masters.includes(id);
+    const isElite = (id) => elite.includes(id);
+
     const card = h('div', { class: 'card hi' }, [
-      h('div', { class: 'card-title' }, [`年度总决赛 · 擂台赛 第 ${ev.day} 日`, h('span', { class: 'tag pill', text: 'BO5' })]),
-      h('p', { class: 'dim', text: '12 队分为大师组与精英组，组外单循环，两个组别独立排名。' }),
+      h('div', { class: 'card-title' }, [`年度总决赛 · 小组赛 第 ${ev.day}/6 日`, h('span', { class: 'tag pill', text: '大师组 × 精英组' })]),
+      h('p', { class: 'dim', text: '12 队按年度积分分为大师组与精英组，组外单循环 BO5，两组独立排名。' }),
     ]);
+
+    // 本轮对阵（标注大师组/精英组）
+    const ms = h('div', { class: 'mt' }, [h('h3', { text: '本轮对阵' })]);
     for (const r of ev.results || []) {
-      card.append(h('div', { class: `score-line ${r.isPlayer ? 'mine' : ''}` }, [
+      ms.append(h('div', { class: `score-line ${r.isPlayer ? 'mine' : ''}` }, [
         h('span', { class: 't', text: TEAM_BY_ID[r.a].name }),
+        h('span', { class: `flag ${isMaster(r.a) ? 'm' : isElite(r.a) ? 'e' : ''}`, text: isMaster(r.a) ? '大师' : isElite(r.a) ? '精英' : '' }),
         h('span', { class: 'sc', text: `${r.scoreA}-${r.scoreB}` }),
+        h('span', { class: `flag ${isMaster(r.b) ? 'm' : isElite(r.b) ? 'e' : ''}`, text: isMaster(r.b) ? '大师' : isElite(r.b) ? '精英' : '' }),
         h('span', { class: 't right', text: TEAM_BY_ID[r.b].name }),
       ]));
     }
+    card.append(ms);
+
+    // 两个组别的实时积分榜
+    if (ev.tables) {
+      const table = (title, ids, tb) => h('div', { class: 'card mt' }, [
+        h('div', { class: 'card-title', text: title }),
+        ...rankTeams(ids, tb).map((id, i) => {
+          const row = tb?.[id];
+          return h('div', {
+            class: `board-row ${id === g.userTeamId ? 'mine' : ''}`,
+          }, [
+            h('span', { class: 'pos', text: String(i + 1) }),
+            h('span', { class: 'nm', text: TEAM_BY_ID[id].short }),
+            h('span', { class: 'rec', text: row ? `${row.wins}胜${row.losses}负` : '—' }),
+          ]);
+        }),
+      ]);
+      card.append(
+        h('div', { class: 'split mt' }, [
+          table('大师组积分榜', masters, ev.tables.masters),
+          table('精英组积分榜', elite, ev.tables.elite),
+        ]),
+      );
+    }
+
     screen.append(card, footer('继续'));
     return;
   }
@@ -1128,7 +1191,7 @@ function renderSeriesPause(ev) {
   screen.append(card, panel);
 }
 
-/** 巅峰对决前的阵容博弈 */
+/** 巅峰对决前的阵容博弈（真实 BP）：看版本强势 + 对手 BP 习惯，再逐位置选英雄 */
 function renderLineupPause(ev) {
   const g = state.game;
   const screen = screenEl();
@@ -1138,40 +1201,120 @@ function renderLineupPause(ev) {
   const oppId = myIsA ? ev.match.b : ev.match.a;
   const my = myIsA ? s.a : s.b;
   const op = myIsA ? s.b : s.a;
-  const oppStyle = STYLES[g.teams[oppId]?.style]?.name || '—';
 
-  const card = h('div', { class: 'card gold' }, [
+  // 首次进入本次 BP：清空选人（主动选 5 个，而非"换"默认阵容）+ 播放《冠军杯》音乐
+  if (state.peakFor !== ev) {
+    state.peakFor = ev;
+    state.peakPicks = {};
+    playPeakBgm();
+  }
+  const rec = metaRecommendation();
+  const habit = teamBpHabit(g, oppId);
+  const picked = POSITIONS.filter((p) => state.peakPicks[p.key]);
+  const allPicked = picked.length === POSITIONS.length;
+
+  const card = h('div', { class: 'card gold peak-card' }, [
     h('div', { class: 'card-title' }, ['★ 巅峰对决', h('span', { class: 'tag pill', text: `决胜局（BO${s.bestOf} 第 ${s.bestOf} 局）` })]),
-    h('p', { class: 'dim', text: `${my} : ${op} 战平，进入巅峰对决 —— 双方各自提交阵容、互不可见，且不受全局 BP 限制。这一局比的是**赌阵容**：猜对面想打什么，然后拿克制它的一套。` }),
+    h('p', { class: 'dim', text: `${my} : ${op} 战平，进入巅峰对决 —— 双方**互不可见**地提交 5 个英雄，且不受全局 BP 限制。` }),
     h('div', { class: 'row between', style: { margin: '6px 0' } }, [
       h('div', { class: 'grow' }, [h('div', { style: { fontWeight: 700 }, text: TEAM_BY_ID[pid].name }), h('div', { class: 'mute', text: '我方' })]),
       h('div', { class: 'big', text: `${my} : ${op}` }),
       h('div', { class: 'grow', style: { textAlign: 'right' } }, [h('div', { style: { fontWeight: 700 }, text: TEAM_BY_ID[oppId].name }), h('div', { class: 'mute', text: '对手' })]),
     ]),
-    ...(ev.chunks || []).map((c) => renderDotsFor(s.games.slice(c.from - 1, c.to), myIsA)),
-    h('p', { class: 'mute', text: `对手「${TEAM_BY_ID[oppId].name}」的战术风格是「${oppStyle}」—— 他们大概率会往这个方向选阵容。` }),
+    // 当前版本强势阵容
+    h('div', { class: 'card-title', text: '当前版本强势阵容（KPL 出场率参考）' }),
+    h('div', { class: 'peak-meta' }, rec.map((hero) => h('div', { class: 'peak-meta-hero' }, [
+      h('div', { class: 'mute', text: POSITIONS.find((p) => p.key === hero.pos)?.name }),
+      h('div', { class: 'nm', text: hero.name }),
+      h('div', { class: `tag ${hero.tier === 0 ? 'gold' : 'mute'}`, text: `T${hero.tier} · ${hero.rate}%` }),
+    ]))),
+    // 对手 BP 习惯
+    h('div', { class: 'card-title', text: `对手 BP 习惯 · ${TEAM_BY_ID[oppId].name}` }),
+    h('p', { class: 'mute', text: `战术风格「${habit.styleName}」，偏好打法「${habit.tendencyName}」—— 大概率往这个方向拿英雄。` }),
+    h('div', { class: 'peak-habit' }, habit.signatures.map(({ pos, hero }) => h('div', { class: 'peak-habit-hero' }, [
+      h('div', { class: 'mute', text: POSITIONS.find((p) => p.key === pos)?.name }),
+      h('div', { class: 'nm', text: hero.name }),
+      h('div', { class: 'mute', text: STYLE_LABEL[hero.style] }),
+    ]))),
   ]);
 
+  // 逐位置选英雄
   const panel = h('div', { class: 'card' }, [
-    h('div', { class: 'card-title', text: '选择你的决胜局阵容' }),
-    h('p', { class: 'mute', text: '克制环：强开团 → 四一分推 → 远程消耗 → 保核反手 → 抓单集火 → 强开团。猜中克制 +3.5 战力，被克制 -3.5；与自家风格契合再 +1。' }),
+    h('div', { class: 'card-title', text: `逐位置选英雄（已选 ${picked.length}/5）` }),
+    h('p', { class: 'mute', text: '克制环：强开团 → 四一分推 → 远程消耗 → 保核反手 → 抓单集火 → 强开团。读对手习惯，拿克制它的一套。' }),
   ]);
-  for (const l of LINEUPS) {
-    const aff = styleAffinity(g.teams[pid]?.style, l.id);
-    panel.append(h('div', { class: 'train-row' }, [
-      h('div', { class: 'grow' }, [
-        h('b', { text: `${l.icon} ${l.name}` }),
-        aff ? h('span', { class: 'tag pill', style: { marginLeft: '6px' }, text: '契合本队风格 +1' }) : null,
-        h('div', { class: 'mute', style: { fontSize: '11px' }, text: l.desc }),
-      ]),
-      h('button', {
-        class: 'small',
-        text: '选它',
-        onClick: () => progress({ lineup: l.id }),
-      }),
+  for (const p of POSITIONS) {
+    const cur = state.peakPicks[p.key] ? HERO_BY_ID[state.peakPicks[p.key]] : null;
+    panel.append(h('div', { class: 'peak-pick-row' }, [
+      h('span', { class: 'pos', text: `${p.icon} ${p.name}` }),
+      h('div', { class: 'grow' }, cur ? [
+        h('b', { text: cur.name }),
+        h('span', { class: 'mute', style: { marginLeft: '6px' }, text: `T${cur.tier} · ${cur.rate}% · ${STYLE_LABEL[cur.style]}` }),
+      ] : [h('span', { class: 'mute', text: '未选择' })]),
+      h('button', { class: 'small', text: '选英雄', onClick: () => openHeroPicker(p) }),
     ]));
   }
+  panel.append(
+    h('button', {
+      class: 'ghost block mt',
+      text: '一键采用版本强势阵容',
+      onClick: () => {
+        state.peakPicks = {};
+        for (const hh of metaRecommendation()) state.peakPicks[hh.pos] = hh.id;
+        renderShell();
+      },
+    }),
+    h('button', {
+      class: 'primary block mt',
+      text: '提交阵容，进入决胜局',
+      disabled: !allPicked,
+      onClick: () => { stopBgm(); progress({ picks: POSITIONS.map((p) => state.peakPicks[p.key]) }); },
+    }),
+  );
+
   screen.append(card, panel);
+}
+
+/** 打开某个位置的英雄选择器（modal） */
+function openHeroPicker(pos) {
+  const pool = heroesByPos(pos.key);
+  const body = h('div', { class: 'hero-picker' });
+  for (const hero of pool) {
+    const on = state.peakPicks[pos.key] === hero.id;
+    body.append(h('div', {
+      class: `hero-opt ${on ? 'on' : ''}`,
+      onClick: () => {
+        state.peakPicks[pos.key] = hero.id;
+        closeModal();
+        renderShell();
+      },
+    }, [
+      h('b', { text: hero.name }),
+      h('span', { class: `tag ${hero.tier === 0 ? 'gold' : hero.tier === 2 ? 'mute' : ''}`, text: `T${hero.tier} · ${hero.rate}%` }),
+      h('span', { class: 'mute', text: STYLE_LABEL[hero.style] }),
+    ]));
+  }
+  modal({ title: `选择${pos.name}英雄`, body });
+}
+
+/** 展示一次巅峰对决的双方英雄阵容 + 结算结论 */
+function peakLineupShow(lineup) {
+  const row = (title, ids) => h('div', { class: 'peak-lineup' }, [
+    h('span', { class: 'mute', text: title }),
+    ...(ids || []).map((id) => {
+      const hh = HERO_BY_ID[id];
+      return hh ? h('span', {
+        class: 'pill', text: hh.name,
+        title: `T${hh.tier} · 出场率 ${hh.rate}% · ${STYLE_LABEL[hh.style]}`,
+      }) : null;
+    }),
+  ]);
+  return h('div', { class: 'peak-banner gold' }, [
+    h('div', { class: 'card-title', text: '巅峰对决阵容' }),
+    row('我方　', lineup.mine),
+    row('对手　', lineup.theirs),
+    h('p', { class: 'mute', style: { marginTop: '4px' }, text: lineup.text }),
+  ]);
 }
 
 function renderGroupTable(groups, tables, game) {
@@ -1234,7 +1377,7 @@ function renderBracketEvent(ev, next) {
         card.append(h('div', { class: 'peak-banner', text: `中场调整：${ev.adjustment.text}` }));
       }
       if (ev.lineup) {
-        card.append(h('div', { class: 'peak-banner gold', text: `巅峰对决博弈：${ev.lineup.text}` }));
+        card.append(peakLineupShow(ev.lineup));
       }
       card.append(renderInterview({ ...result, matchId: match.id }, { title: match.bracket === 'F' && result.winnerId === g.userTeamId }));
       continue;
@@ -1247,6 +1390,10 @@ function renderBracketEvent(ev, next) {
     }
   }
   if (ev.finished) {
+    if (ev.championId === g.userTeamId) {
+      // 玩家夺冠：捧杯时刻 + 冠军赛后采访
+      card.append(renderChampionCelebration(ev));
+    }
     card.append(h('div', { class: 'peak-banner', text: `冠军：${TEAM_BY_ID[ev.championId]?.name || '-'}　|　你的名次：${ev.playerPlacement ? '第 ' + ev.playerPlacement + ' 名' : '未参赛'}` }));
   }
   const played = ev.matches.some(({ match }) => match.a === g.userTeamId || match.b === g.userTeamId);
@@ -1256,6 +1403,27 @@ function renderBracketEvent(ev, next) {
     renderBracketTree(ev.bracket, g),
     h('button', { class: 'primary block mt', text: '继续', onClick: next }),
   );
+}
+
+/** 夺冠庆祝：捧杯时刻 + 冠军赛后采访 */
+function renderChampionCelebration(ev) {
+  const g = state.game;
+  const box = h('div', { class: 'champion-card' }, [
+    h('div', { class: 'champion-rays' }),
+    h('div', { class: 'champion-trophy', text: '🏆' }),
+    h('div', { class: 'champion-title', text: '捧杯时刻' }),
+    h('div', { class: 'champion-sub', text: `${TEAM_BY_ID[g.userTeamId].name} 捧起 ${ev.stageName} 冠军奖杯！` }),
+  ]);
+  // 冠军赛后采访（冠军口吻）
+  const fMatch = ev.matches.find(({ match }) => match.bracket === 'F');
+  if (fMatch) {
+    const interview = renderInterview({
+      ...fMatch.result,
+      a: fMatch.match.a, b: fMatch.match.b, matchId: fMatch.match.id,
+    }, { title: true });
+    if (interview) box.append(interview);
+  }
+  return box;
 }
 
 /**
