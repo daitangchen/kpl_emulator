@@ -1,10 +1,12 @@
 # 本地 AI 助手项目数据，不上传
 .workbuddy/
 
-# 与本项目无关的按键诊断脚本（历史遗留，不入库）
+# 与本项目无关的按键诊断资料（历史遗留，不入库）
 win_key_diagnose.ps1
 win_key_remap.ps1
 win_key_scan.ps1
+解决方案.md
+解决方案-win键诊断.md
 
 # 系统/临时文件
 .DS_Store
